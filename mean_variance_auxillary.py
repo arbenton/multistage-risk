@@ -9,15 +9,13 @@ dist = dict(zip(possible_value, prob))
 
 # Basic Settings
 T = 3
-c_H = 0.2   #Holding cost
-c_P = 2.0   #Panalty for shortage
+c_H = 0.5   # holding cost
+c_P = 1.0   # penalty for shortage
 unit_cost = 1.0
-price =  5.0 #selling price
-lambd =  0.1
-beta = 0.01
-c_SALVAGE = 0 #1.5
-
-
+price =  2.0 # selling price
+lambd =  1
+beta = 0.025
+c_SALVAGE = 1.0 # 1.5
 
 def possible_combo_generator(num, dividend): #can be used to generate all combinations of demand, all combinations of base stock.
     l = []
@@ -32,8 +30,7 @@ def y_level(x_level, policy_level):
     return max(x_level, policy_level)
 
 def x_level_next(y_level, Demand):
-    return (y_level - Demand if y_level - Demand >= 0 else 0)
-
+    return y_level - Demand if y_level - Demand >= 0 else 0
 
 def x_y_combo_list(x_1, policy_list, demand_list): #return the corresbonding x_list and y_list
     x_y_list = [x_1] + [0] * 2 * len(policy_list)
@@ -64,26 +61,27 @@ def y_level_list(x_1, policy_list, demand_list):
 
 def profit_single_period(x_level, y_level, Demand): 
     if y_level >= Demand:
-        profit = unit_cost * (x_level - y_level) - c_H * (y_level - Demand) + price * Demand 
+        profit = - unit_cost*(y_level - x_level) - c_H*(y_level - Demand) + price * Demand 
     elif y_level < Demand:
-        profit = unit_cost * (x_level - y_level) - c_P * (Demand - y_level) + price * y_level 
+        profit = - unit_cost*(y_level - x_level) - c_P*(Demand - y_level) + price * y_level 
     return profit
 
+"""
 def cost_single_period(x_level, y_level, Demand):
     if y_level >= Demand:
         cost = unit_cost * (y_level - x_level) + c_H * (y_level - Demand) 
     elif y_level < Demand:
         cost = unit_cost * (y_level - x_level) + c_P * (Demand - y_level) 
     return cost
+"""
 
-
-def sum_profit_prob_1(x_list, y_list, demand_list): 
+def sum_profit_prob(x_list, y_list, demand_list): 
     """return the sum of profit and the pro of getting that profit with determined x_1 and policy_list. Ignore salvage."""
-    profit = c_SALVAGE * x_list[-1]
+    profit = c_SALVAGE * x_list[-1] 
     prob = 1
     for t in range(len(y_list)):
-        profit = profit + profit_single_period(x_list[t], y_list[t], demand_list[t])
-        prob = prob * dist[demand_list[t]]
+        profit += profit_single_period(x_list[t], y_list[t], demand_list[t])
+        prob *= dist[demand_list[t]]
     return profit, prob
 
 def sum_profit_prob_2(x_list, y_list, demand_list): #negative cost as the objective
@@ -94,6 +92,7 @@ def sum_profit_prob_2(x_list, y_list, demand_list): #negative cost as the object
         profit = profit + profit_single_period(x_list[t], y_list[t], demand_list[t])
         prob = prob * dist[demand_list[t]]
     return profit, prob
+
 
 """
 state_action_combo = []
@@ -108,17 +107,20 @@ for x_1 in range(11):
 all_path = {} 
 for x_1 in range(11):
     x_policy_dict = {}
-    for policy_gene in range(11 ** T):   #generate policy_list
-        policy_list = possible_combo_generator(policy_gene, 11)
+    for policy_gene in range(10 ** T):   #generate policy_list
+        policy_list = possible_combo_generator(policy_gene, 10)
         profit_prob_combo = []
         for demand_gene in range(len(dist) ** T):
             demand_list = possible_combo_generator(demand_gene, len(dist))
+            #print(policy_list, demand_list)
             x_list, y_list = x_y_combo_list(x_1, policy_list, demand_list)
+            #print(x_list, y_list)
             profit, prob = sum_profit_prob(x_list, y_list, demand_list)
             profit_prob_combo.append([profit, prob])
-        x_policy_dict[tuple(policy_list)] = profit_prob_combo
-    all_path[x_1] = x_policy_dict
 
+        x_policy_dict[tuple(policy_list)] = profit_prob_combo
+
+    all_path[x_1] = x_policy_dict
 
 all_mean_variance = {} 
 for x_1, x_policy_dict in all_path.items():
@@ -149,6 +151,9 @@ for x_1, x_policy_dict in all_mean.items():
             best_strategy[key] = value
     best_strategy_expection[x_1] = best_strategy
 
+print(best_strategy_expection[0])
+#print(best_strategy_expection[2])
+
 #MEAN_VARIANCE
 all_mv = copy.deepcopy(all_mean_variance)
 for x_1, x_policy_dict in all_mv.items():
@@ -162,7 +167,6 @@ for x_1, x_policy_dict in all_mv.items():
         if (value == max(x_policy_dict.values())):
             best_strategy[key] = value
     best_strategy_mv[x_1] = best_strategy
-
 
 #Auxillary Problem
 auxillary_variance = {} 
@@ -186,9 +190,4 @@ for x_1, x_policy_dict in auxillary_variance.items():
         if (value == max(x_policy_dict.values())):
             best_strategy[key] = value
     best_strategy_auxillary[x_1] = best_strategy
-
-
-
-
-
 

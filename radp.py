@@ -7,12 +7,14 @@ from multiprocessing import Pool
 
 class InventoryControlProblem(object):
 
-    def __init__(self, demand_dist, trunc, unit_cost=1, holding=0.5, penalty=5.0, setup=0):
+    def __init__(self, demand_dist, trunc, unit_cost, holding, penalty, setup, revenue, salvage):
         self.lower, self.upper = trunc
         self.demand_dist = demand_dist
         self.c = unit_cost
         self.c_H = holding
         self.c_P = penalty
+        self.r = revenue
+        self.s = salvage
         self.K = setup
 
     @property
@@ -22,35 +24,24 @@ class InventoryControlProblem(object):
     def actions(self, x):
         return [y for y in self.states if y >= x]
 
-    def state_action_cost(self, x, y):
+    def cost(self, x, y):
         """ deterministic costs from having inventory level x and setting stocking level y. """
         if y not in self.actions(x):
             raise ValueError(f"Stocking level y = {y} is infeasible in state x = {x}.")
         cost = self.c*(y - x) + self.K*int(x < y)
         return cost
 
-    def transition_prob(self, y):
+    def transition(self, x, y):
         if y not in self.states:
             raise ValueError(f"Stocking level y = {y} greater than UPPER_STATE = {self.upper}.")
-        prob = np.zeros(len(self.states))
-        if y >= 0:
-            d = np.arange(0, self.upper + 1)
-        else:
-            d = np.arange(0, self.upper + 1 + y)
-        prob[y - d - self.lower] = self.demand_dist.pmf(d)
-        prob[:] /= np.sum(prob) # rescale for truncation
-        return prob
-
-    def transition_cost(self, y):
-        if y not in self.states:
-            raise ValueError(f"Stocking level y = {y} greater than UPPER_STATE = {self.upper}.")
-        cost = np.zeros(len(self.states))
         d = np.arange(0, self.upper + 1)
-        cost[y - d - self.lower] = self.c_H*np.maximum(y - d, 0) + self.c_P*np.maximum(d - y, 0)
-        return cost
+        p = self.demand_dist.pmf(d)
+        xp = np.maximum(y - d - self.lower, -self.lower)
+        c = self.c_H*np.maximum(y - d, 0) + self.c_P*np.maximum(d - y, 0) - self.r*np.minimum(d, y)
+        return c, p, xp
 
     def terminal_cost(self, x):
-        return 0#self.c_H*np.maximum(x, 0) + self.c_P*np.maximum(x, 0)
+        return self.s*x
 
 class DynamicProgrammingSolver(object):
     """ Base class with generalized value iteration """
@@ -59,10 +50,9 @@ class DynamicProgrammingSolver(object):
         action_value = np.zeros(len(problem.actions(x)))
         best_u_value = np.inf
         for u in problem.actions(x):
-            deterministic_cost = problem.state_action_cost(x, u)
-            random_cost = problem.transition_cost(u)
-            prob = problem.transition_prob(u)
-            risk = self.expect((discount*next_value + random_cost), prob)
+            deterministic_cost = problem.cost(x, u)
+            random_cost, prob, next_x = problem.transition(x, u)
+            risk = self.expect((discount*next_value[next_x] + random_cost), prob)
             action_value = deterministic_cost + risk
             if action_value <= best_u_value:
                 best_u = u
@@ -192,7 +182,6 @@ class CVaRSolver(DynamicProgrammingSolver):
     def __init__(self, nb_measure, alpha=0.95):
         self.nb_measure = nb_measure 
         self.alpha = alpha
-        self.old = DualCVaRSolver(nb_measure, alpha)
 
     def expect(self, v, p):
         q = np.percentile(v, 100*self.alpha)
@@ -225,24 +214,25 @@ class EVaRSolver(DynamicProgrammingSolver):
 
 if __name__ == '__main__':
     nb_period = 3
-    discount_rate = 1.0
-    max_demand = 4
+    max_demand = 20
     upper_state = int(max_demand)
-    lower_state = int(-max_demand)
+    lower_state = 0
     lambd = 1
     demand_dist = stats.randint(0, 4)
     problem = InventoryControlProblem(demand_dist, 
                                       (lower_state, upper_state), 
-                                      unit_cost=1, 
-                                      holding=0.2, 
-                                      penalty=2.0,
-                                      setup=0.0)
+                                      unit_cost=1.0, 
+                                      holding=0.5,
+                                      penalty=1.0,
+                                      setup=0.0,
+                                      revenue=2.0,
+                                      salvage=-1.0)#1.0)
     #solver = EVaRSolver(len(problem.states), alpha=0.90)
     #solver = CVaRSolver(len(problem.states), alpha=0.90)
     solver = ExpectationSolver()
     value, policy = solver.value_iteration(problem, nb_period, discount=1.0)
-    print(policy)
-    print(value)
+    print(policy[:, 0])
+    print(value[:, 0])
 
     plt.subplot(2, 1, 1)
     for t in range(nb_period):
